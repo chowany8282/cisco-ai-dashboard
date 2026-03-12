@@ -103,8 +103,6 @@ def llm_with_routing(
     preferred_model_id: str,
     auto_route: bool,
     temperature: float | None = None,
-    timeout_seconds: int = 18,
-    max_retries: int = 0,
 ) -> tuple[str, str]:
     candidates = _pick_model_for_feature(feature, preferred_model_id, auto_route)
     count_key = FEATURE_TO_COUNT_KEY[feature]
@@ -117,8 +115,6 @@ def llm_with_routing(
                 api_key=api_key,
                 model_id=model_id,
                 temperature=temperature,
-                timeout_seconds=timeout_seconds,
-                max_retries=max_retries,
             )
             shared_data["stats"][count_key] += 1
             shared_data["model_usage"][feature][model_id] += 1
@@ -126,20 +122,7 @@ def llm_with_routing(
         except LLMError as e:
             last_error = e
             err_text = str(e).lower()
-            retryable = any(
-                x in err_text
-                for x in [
-                    "429",
-                    "quota",
-                    "resource_exhausted",
-                    "timeout",
-                    "deadline",
-                    "unavailable",
-                    "internal",
-                    "503",
-                    "500",
-                ]
-            )
+            retryable = any(x in err_text for x in ["429", "quota", "resource_exhausted"])
             if retryable:
                 continue
             break
@@ -309,8 +292,6 @@ with tab1:
                         feature="log_detail",
                         preferred_model_id=MODEL_ID,
                         auto_route=auto_route,
-                        timeout_seconds=14,
-                        max_retries=0,
                     )
                     st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
