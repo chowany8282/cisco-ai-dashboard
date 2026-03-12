@@ -14,18 +14,6 @@ st.set_page_config(page_title="Cisco AI Master System", page_icon="🛡️", lay
 
 PROMPT_DIR = Path("prompts")
 USAGE_KEYS = ["select_cnt", "log_cnt", "spec_cnt", "os_cnt"]
-MODEL_OPTIONS = {
-    "Gemini 3.0 Pro (최고 성능/정밀 분석용)": "models/gemini-3-flash-preview",
-    "Gemini 2.5 Flash (표준/균형)": "models/gemini-2.5-flash",
-    "Gemini 2.5 Lite (초고속/가성비)": "models/gemini-2.5-flash-lite",
-}
-ROUTING_ORDER = list(MODEL_OPTIONS.values())
-FEATURE_TO_COUNT_KEY = {
-    "log_select": "select_cnt",
-    "log_detail": "log_cnt",
-    "spec_lookup": "spec_cnt",
-    "os_recommend": "os_cnt",
-}
 
 
 def load_prompt(name: str) -> str:
@@ -49,8 +37,6 @@ def get_shared_store() -> dict:
     return {
         "date": "",
         "stats": {key: 0 for key in USAGE_KEYS},
-        "model_usage": {},
-        "os_weekly_cache": {},
     }
 
 
@@ -71,70 +57,10 @@ def clear_os_input() -> None:
     st.session_state["os_ver"] = ""
 
 
-def _ensure_model_usage_store() -> None:
-    if "model_usage" not in shared_data:
-        shared_data["model_usage"] = {}
-    for feature in FEATURE_TO_COUNT_KEY:
-        shared_data["model_usage"].setdefault(feature, {})
-        for model_id in ROUTING_ORDER:
-            shared_data["model_usage"][feature].setdefault(model_id, 0)
-
-
-def _pick_model_for_feature(feature: str, preferred_model_id: str, auto_route: bool) -> list[str]:
-    _ensure_model_usage_store()
-
-    if not auto_route:
-        others = [model for model in ROUTING_ORDER if model != preferred_model_id]
-        return [preferred_model_id, *others]
-
-    usage = shared_data["model_usage"][feature]
-    ordered = sorted(
-        ROUTING_ORDER,
-        key=lambda model: (usage.get(model, 0), model != preferred_model_id),
-    )
-    return ordered
-
-
-def llm_with_routing(
-    *,
-    prompt: str,
-    api_key: str,
-    feature: str,
-    preferred_model_id: str,
-    auto_route: bool,
-    temperature: float | None = None,
-) -> tuple[str, str]:
-    candidates = _pick_model_for_feature(feature, preferred_model_id, auto_route)
-    count_key = FEATURE_TO_COUNT_KEY[feature]
-    last_error: Exception | None = None
-
-    for model_id in candidates:
-        try:
-            response = get_gemini_response(
-                prompt=prompt,
-                api_key=api_key,
-                model_id=model_id,
-                temperature=temperature,
-            )
-            shared_data["stats"][count_key] += 1
-            shared_data["model_usage"][feature][model_id] += 1
-            return response, model_id
-        except LLMError as e:
-            last_error = e
-            err_text = str(e).lower()
-            retryable = any(x in err_text for x in ["429", "quota", "resource_exhausted"])
-            if retryable:
-                continue
-            break
-
-    raise LLMError(str(last_error) if last_error else "Unknown LLM error")
-
-
-def _get_weekly_cache_key(device_family: str, os_model: str, os_ver: str) -> str:
-    iso_year, iso_week, _ = kst_now.isocalendar()
-    model_upper = os_model.strip().upper()
-    ver_upper = os_ver.strip().upper()
-    return f"{iso_year}-W{iso_week}|{device_family}|{model_upper}|{ver_upper}"
+def llm_with_count(prompt: str, api_key: str, model_id: str, count_key: str) -> str:
+    response = get_gemini_response(prompt=prompt, api_key=api_key, model_id=model_id)
+    shared_data["stats"][count_key] += 1
+    return response
 
 
 shared_data = get_shared_store()
@@ -145,7 +71,6 @@ if shared_data["date"] != today_str:
     shared_data["date"] = today_str
     for key in USAGE_KEYS:
         shared_data["stats"][key] = 0
-    shared_data["model_usage"] = {}
 
 try:
     API_KEY_LOG = st.secrets["API_KEY_LOG"]
@@ -159,16 +84,23 @@ except Exception:
 
 with st.sidebar:
     st.header("🤖 엔진 설정")
-    selected_model_name = st.selectbox("사용할 AI 모델을 선택하세요:", tuple(MODEL_OPTIONS.keys()))
-    MODEL_ID = MODEL_OPTIONS[selected_model_name]
-
-    auto_route = st.checkbox(
-        "모델 자동 분산 라우팅 (모델별 무료 슬롯 균등 사용)",
-        value=True,
-        help="모델별 호출 횟수를 분산해 429/쿼터 초과 시 자동으로 다른 모델로 전환합니다.",
+    selected_model_name = st.selectbox(
+        "사용할 AI 모델을 선택하세요:",
+        (
+            "Gemini 3.0 Pro (최고 성능/정밀 분석용)",
+            "Gemini 2.5 Flash (표준/균형)",
+            "Gemini 2.5 Lite (초고속/가성비)",
+        ),
     )
 
-    st.success(f"현재 엔진(기본): {selected_model_name}")
+    if "3.0 Pro" in selected_model_name:
+        MODEL_ID = "models/gemini-3-flash-preview"
+    elif "2.5 Lite" in selected_model_name:
+        MODEL_ID = "models/gemini-2.5-flash-lite"
+    else:
+        MODEL_ID = "models/gemini-2.5-flash"
+
+    st.success(f"현재 엔진: {selected_model_name}")
     st.caption(f"System ID: {MODEL_ID}")
 
     st.markdown("---")
@@ -217,7 +149,7 @@ with tab0:
         if not final_log_content:
             st.warning("분석할 로그를 입력해주세요!")
         else:
-            with st.spinner("🤖 AI가 핵심 내용만 요약 중입니다..."):
+            with st.spinner(f"🤖 AI({MODEL_ID.split('/')[-1]})가 핵심 내용만 요약 중입니다..."):
                 classify_prompt = f"""
 당신은 Cisco 네트워크 엔지니어입니다.
 아래 로그 파일을 분석하여 **딱 두 가지 항목**으로만 요약하세요.
@@ -238,15 +170,13 @@ with tab0:
 {final_log_content}
 """
                 try:
-                    classified_result, used_model = llm_with_routing(
+                    classified_result = llm_with_count(
                         prompt=classify_prompt,
                         api_key=API_KEY_LOG,
-                        feature="log_select",
-                        preferred_model_id=MODEL_ID,
-                        auto_route=auto_route,
+                        model_id=MODEL_ID,
+                        count_key="select_cnt",
                     )
                     st.session_state["classified_result"] = classified_result
-                    st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
                     st.error("로그 분류에 실패했습니다. 잠시 후 다시 시도해주세요.")
                     with st.expander("오류 상세"):
@@ -283,17 +213,18 @@ with tab1:
         if not log_input:
             st.warning("로그를 입력해주세요!")
         else:
-            prompt = render_prompt(get_prompt_template("log_analysis.txt"), log_input=log_input)
+            prompt = render_prompt(
+                get_prompt_template("log_analysis.txt"),
+                log_input=log_input,
+            )
             with st.spinner("AI가 정밀 진단 중입니다..."):
                 try:
-                    result, used_model = llm_with_routing(
+                    result = llm_with_count(
                         prompt=prompt,
                         api_key=API_KEY_LOG,
-                        feature="log_detail",
-                        preferred_model_id=MODEL_ID,
-                        auto_route=auto_route,
+                        model_id=MODEL_ID,
+                        count_key="log_cnt",
                     )
-                    st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
                     st.error("로그 분석에 실패했습니다. 잠시 후 다시 시도해주세요.")
                     with st.expander("오류 상세"):
@@ -334,17 +265,18 @@ with tab2:
         if not model_input:
             st.warning("모델명을 입력해주세요!")
         else:
-            prompt = render_prompt(get_prompt_template("spec_lookup.txt"), model_input=model_input)
+            prompt = render_prompt(
+                get_prompt_template("spec_lookup.txt"),
+                model_input=model_input,
+            )
             with st.spinner("데이터시트 검색 중..."):
                 try:
-                    result, used_model = llm_with_routing(
+                    result = llm_with_count(
                         prompt=prompt,
                         api_key=API_KEY_SPEC,
-                        feature="spec_lookup",
-                        preferred_model_id=MODEL_ID,
-                        auto_route=auto_route,
+                        model_id=MODEL_ID,
+                        count_key="spec_cnt",
                     )
-                    st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
                     st.error("스펙 조회에 실패했습니다. 모델명/네트워크 상태를 확인해주세요.")
                     with st.expander("오류 상세"):
@@ -354,7 +286,6 @@ with tab2:
 
 with tab3:
     st.header("💿 OS 추천 및 안정성 진단")
-    st.caption("같은 주차(week)에는 동일 입력에 동일 추천 결과를 반환합니다.")
 
     device_family = st.radio(
         "장비 계열 선택 (Device Family)",
@@ -378,47 +309,50 @@ with tab3:
         if not os_model:
             st.warning("장비 모델명은 필수입니다!")
         else:
-            os_ver_safe = os_ver if os_ver else "정보 없음"
-            cache_key = _get_weekly_cache_key(device_family, os_model, os_ver_safe)
-            if cache_key in shared_data["os_weekly_cache"]:
-                cached_html = shared_data["os_weekly_cache"][cache_key]
-                st.info("주간 고정 캐시 결과를 표시합니다.")
-                st.markdown(cached_html, unsafe_allow_html=True)
-            else:
-                prompt = render_prompt(
-                    get_prompt_template("os_recommendation.txt"),
-                    os_model=f"{os_model} ({device_family})",
-                    os_ver=(os_ver if os_ver else "정보 없음"),
-                    current_ver_url=(
-                        "https://www.google.com/search?q="
-                        + (
-                            f"Cisco {os_model} {os_ver if os_ver else ''} "
-                            "Last Date of Support"
-                        ).replace(" ", "+")
-                    ),
+            if "Nexus" in device_family:
+                family_prompt = (
+                    "당신은 Cisco Nexus(NX-OS) 전문가입니다. 반드시 **NX-OS 버전**만 추천하세요."
                 )
-                with st.spinner("추천 버전을 검색 중..."):
-                    try:
-                        response_html, used_model = llm_with_routing(
-                            prompt=prompt,
-                            api_key=API_KEY_OS,
-                            feature="os_recommend",
-                            preferred_model_id=MODEL_ID,
-                            auto_route=auto_route,
-                            temperature=0.0,
-                        )
-                        st.caption(f"실행 모델: {used_model}")
-                    except LLMError as e:
-                        st.error("OS 분석에 실패했습니다. 잠시 후 다시 시도해주세요.")
-                        with st.expander("오류 상세"):
-                            st.code(str(e))
-                    else:
-                        response_html = response_html.replace("```html", "").replace("```", "")
-                        has_gold = "gold" in response_html.lower()
-                        has_md = "md" in response_html.lower()
-                        if not (has_gold or has_md):
-                            st.warning("Gold Star/MD 근거가 부족합니다. 결과를 확인 후 사용하세요.")
+            else:
+                family_prompt = (
+                    "당신은 Cisco Catalyst(IOS-XE) 전문가입니다. "
+                    "반드시 **IOS-XE 버전**만 추천하세요."
+                )
 
-                        safe_html = sanitize_basic_html(response_html)
-                        shared_data["os_weekly_cache"][cache_key] = safe_html
-                        st.markdown(safe_html, unsafe_allow_html=True)
+            prompt = f"""
+{family_prompt}
+다음 장비의 **OS 소프트웨어**를 분석하여 **HTML Table** 코드로 출력하세요.
+
+[필수 지침]
+1. 오직 HTML 코드만 출력하세요.
+2. 테이블 스타일: <table border='1' style='width:100%; border-collapse:collapse; text-align:left;'>
+
+[분석 내용]
+- MD 및 Gold Star 버전 최우선 추천.
+- 안정성 등급 별점(⭐⭐⭐⭐⭐) 표시.
+
+[대상 장비]: {os_model} ({device_family})
+[현재 OS 버전]: {os_ver if os_ver else '정보 없음'}
+
+<h3>1. 현재 버전 상태</h3>
+<table>...</table>
+<br>
+<h3>2. 추천 OS (Recommended Releases)</h3>
+<table>...</table>
+"""
+            with st.spinner("추천 버전을 검색 중..."):
+                try:
+                    response_html = llm_with_count(
+                        prompt=prompt,
+                        api_key=API_KEY_OS,
+                        model_id=MODEL_ID,
+                        count_key="os_cnt",
+                    )
+                except LLMError as e:
+                    st.error("OS 분석에 실패했습니다. 잠시 후 다시 시도해주세요.")
+                    with st.expander("오류 상세"):
+                        st.code(str(e))
+                else:
+                    response_html = response_html.replace("```html", "").replace("```", "")
+                    safe_html = sanitize_basic_html(response_html)
+                    st.markdown(safe_html, unsafe_allow_html=True)
