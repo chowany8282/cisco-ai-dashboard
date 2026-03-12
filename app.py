@@ -26,13 +26,6 @@ FEATURE_TO_COUNT_KEY = {
     "spec_lookup": "spec_cnt",
     "os_recommend": "os_cnt",
 }
-REQUIRED_ACTION_SECTIONS = [
-    "즉시 조치",
-    "원인별 상세 조치",
-    "검증 절차",
-    "롤백 계획",
-    "재발 방지 체크리스트",
-]
 
 
 def load_prompt(name: str) -> str:
@@ -159,10 +152,6 @@ def _get_weekly_cache_key(device_family: str, os_model: str, os_ver: str) -> str
     model_upper = os_model.strip().upper()
     ver_upper = os_ver.strip().upper()
     return f"{iso_year}-W{iso_week}|{device_family}|{model_upper}|{ver_upper}"
-
-
-def has_required_action_sections(part3_text: str) -> bool:
-    return all(section in part3_text for section in REQUIRED_ACTION_SECTIONS)
 
 
 shared_data = get_shared_store()
@@ -330,39 +319,7 @@ with tab1:
                         st.code(str(e))
                 else:
                     parsed_json = validate_log_analysis_json(result)
-                    if parsed_json and not has_required_action_sections(parsed_json.part3):
-                        repair_prompt = f"""
-이전 응답의 권장 조치(part3)에서 필수 섹션이 누락되었습니다.
-아래 로그를 다시 분석하고 JSON으로만 답하세요.
-
-필수 섹션(정확한 문구 포함):
-- 즉시 조치
-- 원인별 상세 조치
-- 검증 절차
-- 롤백 계획
-- 재발 방지 체크리스트
-
-로그:
-{log_input}
-"""
-                        try:
-                            repaired_result, used_model = llm_with_routing(
-                                prompt=repair_prompt,
-                                api_key=API_KEY_LOG,
-                                feature="log_detail",
-                                preferred_model_id=MODEL_ID,
-                                auto_route=auto_route,
-                                timeout_seconds=14,
-                                max_retries=0,
-                            )
-                            parsed_json = validate_log_analysis_json(repaired_result) or parsed_json
-                            st.caption(f"보정 실행 모델: {used_model}")
-                        except LLMError:
-                            pass
-
                     if parsed_json:
-                        if not has_required_action_sections(parsed_json.part3):
-                            st.warning("권장 조치 일부 섹션이 누락되어 수동 검토가 필요합니다.")
                         st.subheader("🔴 발생 원인")
                         st.error(parsed_json.part1)
                         st.subheader("🟡 네트워크 영향")
