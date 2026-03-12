@@ -332,8 +332,8 @@ with tab1:
                         feature="log_detail",
                         preferred_model_id=MODEL_ID,
                         auto_route=auto_route,
-                        timeout_seconds=20,
-                        max_retries=0,
+                        timeout_seconds=24,
+                        max_retries=1,
                     )
                     st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
@@ -373,28 +373,27 @@ with tab1:
                             pass
 
                     if not parsed_json:
-                        fallback_prompt = f"""
-당신은 시스코 TAC 엔지니어입니다.
-아래 로그를 분석하고 한국어로 답하세요.
-반드시 [PART_1], [PART_2], [PART_3] 형식을 지키세요.
+                        strict_repair_prompt = f"""
+아래 로그를 다시 분석하고 JSON으로만 답하세요.
+키는 part1, part2, part3만 사용하세요.
+part3는 실행 가능한 조치 중심으로 작성하세요.
 
 로그:
 {log_input}
 """
                         try:
-                            fallback_result, used_model = llm_with_routing(
-                                prompt=fallback_prompt,
+                            repaired_result, used_model = llm_with_routing(
+                                prompt=strict_repair_prompt,
                                 api_key=API_KEY_LOG,
                                 feature="log_detail",
-                                preferred_model_id="models/gemini-2.5-flash",
+                                preferred_model_id="models/gemini-3-flash-preview",
                                 auto_route=False,
-                                timeout_seconds=16,
-                                max_retries=0,
+                                timeout_seconds=24,
+                                max_retries=1,
                             )
-                            parsed_json = validate_log_analysis_json(fallback_result)
-                            if not parsed_json:
-                                result = fallback_result
-                            st.caption(f"폴백 실행 모델: {used_model}")
+                            parsed_json = validate_log_analysis_json(repaired_result)
+                            if parsed_json:
+                                st.caption(f"구조화 보정 모델: {used_model}")
                         except LLMError:
                             pass
 
@@ -518,11 +517,11 @@ with tab3:
                             prompt=prompt,
                             api_key=API_KEY_OS,
                             feature="os_recommend",
-                            preferred_model_id="models/gemini-2.5-flash",
-                            auto_route=False,
+                            preferred_model_id=MODEL_ID,
+                            auto_route=auto_route,
                             temperature=0.0,
-                            timeout_seconds=18,
-                            max_retries=0,
+                            timeout_seconds=35,
+                            max_retries=1,
                         )
                         st.caption(f"실행 모델: {used_model}")
                     except LLMError as e:
@@ -534,7 +533,32 @@ with tab3:
                         is_structured = has_structured_os_html(response_html)
                         has_markers = has_os_recommendation_markers(response_html)
 
-                        # 속도 우선 모드: 보정 재호출 없이 1회 응답으로 처리
+                        if not (is_structured and has_markers):
+                            repair_prompt = f"""
+아래 입력 기준으로 OS 추천 결과를 다시 생성하세요.
+반드시 HTML만 출력하고, table/tr/th/td/a/h3/br 태그만 사용하세요.
+반드시 Gold Star 또는 MD 추천만 포함하고, 근거(근거 컬럼)도 포함하세요.
+
+장비: {os_model} ({device_family})
+현재 버전: {os_ver_safe}
+"""
+                            try:
+                                repaired_html, used_model = llm_with_routing(
+                                    prompt=repair_prompt,
+                                    api_key=API_KEY_OS,
+                                    feature="os_recommend",
+                                    preferred_model_id="models/gemini-3-flash-preview",
+                                    auto_route=False,
+                                    temperature=0.0,
+                                    timeout_seconds=35,
+                                    max_retries=1,
+                                )
+                                response_html = clean_html_response(repaired_html)
+                                st.caption(f"보정 실행 모델: {used_model}")
+                                is_structured = has_structured_os_html(response_html)
+                                has_markers = has_os_recommendation_markers(response_html)
+                            except LLMError:
+                                pass
 
                         if not has_markers:
                             st.warning(
@@ -549,6 +573,6 @@ with tab3:
                             )
 
                         safe_html = sanitize_basic_html(response_html)
-                        if is_structured:
+                        if is_structured and has_markers:
                             shared_data["os_weekly_cache"][cache_key] = safe_html
                         st.markdown(safe_html, unsafe_allow_html=True)
