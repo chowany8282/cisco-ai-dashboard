@@ -8,8 +8,9 @@
   2. Streamlit health endpoint (`_stcore/health`)
 
 ## 실패 시 동작
-- GitHub Issue 자동 생성 (`incident`, `ops` 라벨)
-- 제목: `[OPS ALERT] Streamlit smoke check failed - <timestamp>`
+- GitHub Incident Issue 자동 관리 (`incident`, `ops` 라벨)
+- 제목: `[OPS ALERT] Streamlit smoke check failed` (고정)
+- 이미 열려 있는 Incident가 있으면 새 이슈를 만들지 않고 코멘트로 누적
 
 ## 운영자가 할 일
 1. 생성된 Incident Issue 확인
