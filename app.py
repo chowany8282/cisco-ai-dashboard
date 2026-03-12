@@ -75,7 +75,9 @@ with tab1:
                         model_id=MODEL_ID,
                     )
                 except LLMError as e:
-                    st.error(f"로그 분석 실패: {e}")
+                    st.error("로그 분석에 실패했습니다. 잠시 후 다시 시도해주세요.")
+                    with st.expander("오류 상세"):
+                        st.code(str(e))
                 else:
                     parsed_json = validate_log_analysis_json(result)
                     if parsed_json:
@@ -115,7 +117,9 @@ with tab2:
                         model_id=MODEL_ID,
                     )
                 except LLMError as e:
-                    st.error(f"스펙 조회 실패: {e}")
+                    st.error("스펙 조회에 실패했습니다. 모델명/네트워크 상태를 확인해주세요.")
+                    with st.expander("오류 상세"):
+                        st.code(str(e))
                 else:
                     st.markdown(result)
 
@@ -153,7 +157,9 @@ with tab3:
                         model_id=MODEL_ID,
                     )
                 except LLMError as e:
-                    st.error(f"OS 분석 실패: {e}")
+                    st.error("OS 분석에 실패했습니다. 잠시 후 다시 시도해주세요.")
+                    with st.expander("오류 상세"):
+                        st.code(str(e))
                 else:
                     safe_html = sanitize_basic_html(response_html)
                     st.markdown(safe_html, unsafe_allow_html=True)
