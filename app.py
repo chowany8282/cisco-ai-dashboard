@@ -5,6 +5,11 @@ import streamlit as st
 
 from services.llm import LLMError, get_gemini_response
 from services.parsers import parse_log_analysis, sanitize_basic_html
+from services.quality import (
+    has_os_recommendation_markers,
+    has_required_action_sections,
+    normalize_action_sections,
+)
 from services.schemas import validate_log_analysis_json
 
 # ========================================================
@@ -26,13 +31,6 @@ FEATURE_TO_COUNT_KEY = {
     "spec_lookup": "spec_cnt",
     "os_recommend": "os_cnt",
 }
-REQUIRED_ACTION_SECTIONS = [
-    "즉시 조치",
-    "원인별 상세 조치",
-    "검증 절차",
-    "롤백 계획",
-    "재발 방지 체크리스트",
-]
 
 
 def load_prompt(name: str) -> str:
@@ -160,56 +158,6 @@ def _get_weekly_cache_key(device_family: str, os_model: str, os_ver: str) -> str
     ver_upper = os_ver.strip().upper()
     return f"{iso_year}-W{iso_week}|{device_family}|{model_upper}|{ver_upper}"
 
-
-def has_required_action_sections(part3_text: str) -> bool:
-    return all(section in part3_text for section in REQUIRED_ACTION_SECTIONS)
-
-
-def normalize_action_sections(part3_text: str) -> str:
-    text = (part3_text or "").strip()
-    if not text:
-        text = "원문 권장 조치가 비어 있습니다. 로그를 재확인하세요."
-
-    if has_required_action_sections(text):
-        return text
-
-    verify_cmds = (
-        "```\n"
-        "show interface status\n"
-        "show logging | inc ERROR|UPDOWN|SPANTREE\n"
-        "show spanning-tree interface <INTERFACE> detail\n"
-        "```"
-    )
-    rollback_cmds = (
-        "```\n"
-        "configure terminal\n"
-        "interface <INTERFACE>\n"
-        "shutdown\n"
-        "no shutdown\n"
-        "end\n"
-        "```"
-    )
-    fallback = {
-        "즉시 조치": "- 영향 인터페이스/장비를 즉시 식별하고 장애 범위를 격리합니다.",
-        "원인별 상세 조치": (
-            "- 물리 계층(케이블/SFP), 인접 장비 설정(STP/LACP), "
-            "오류 카운터를 순서대로 점검합니다."
-        ),
-        "검증 절차": verify_cmds,
-        "롤백 계획": rollback_cmds,
-        "재발 방지 체크리스트": (
-            "- 반복 장애 시 포트 정책(BPDU Guard/Loop Guard), "
-            "소프트웨어 버전, 변경 이력을 점검합니다."
-        ),
-    }
-
-    return (
-        f"1) 즉시 조치\n{text}\n\n"
-        f"2) 원인별 상세 조치\n{fallback['원인별 상세 조치']}\n\n"
-        f"3) 검증 절차\n{fallback['검증 절차']}\n\n"
-        f"4) 롤백 계획\n{fallback['롤백 계획']}\n\n"
-        f"5) 재발 방지 체크리스트\n{fallback['재발 방지 체크리스트']}"
-    )
 
 
 shared_data = get_shared_store()
@@ -527,10 +475,11 @@ with tab3:
                             st.code(str(e))
                     else:
                         response_html = response_html.replace("```html", "").replace("```", "")
-                        has_gold = "gold" in response_html.lower()
-                        has_md = "md" in response_html.lower()
-                        if not (has_gold or has_md):
-                            st.warning("Gold Star/MD 근거가 부족합니다. 결과를 확인 후 사용하세요.")
+                        if not has_os_recommendation_markers(response_html):
+                            st.warning(
+                                "Gold Star/MD 또는 근거 정보가 부족합니다. "
+                                "결과를 확인 후 사용하세요."
+                            )
 
                         safe_html = sanitize_basic_html(response_html)
                         shared_data["os_weekly_cache"][cache_key] = safe_html
