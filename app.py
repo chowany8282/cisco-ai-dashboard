@@ -31,12 +31,6 @@ FEATURE_TO_COUNT_KEY = {
     "spec_lookup": "spec_cnt",
     "os_recommend": "os_cnt",
 }
-FEATURE_MODEL_POOL = {
-    "log_select": ["models/gemini-2.5-flash", "models/gemini-2.5-flash-lite"],
-    "log_detail": ["models/gemini-2.5-flash", "models/gemini-3-flash-preview"],
-    "spec_lookup": ["models/gemini-2.5-flash", "models/gemini-2.5-flash-lite"],
-    "os_recommend": ["models/gemini-2.5-flash", "models/gemini-3-flash-preview"],
-}
 
 
 def load_prompt(name: str) -> str:
@@ -93,16 +87,14 @@ def _ensure_model_usage_store() -> None:
 
 def _pick_model_for_feature(feature: str, preferred_model_id: str, auto_route: bool) -> list[str]:
     _ensure_model_usage_store()
-    pool = FEATURE_MODEL_POOL.get(feature, ROUTING_ORDER)
 
     if not auto_route:
-        base = [preferred_model_id] if preferred_model_id in pool else []
-        others = [model for model in pool if model != preferred_model_id]
-        return [*base, *others]
+        others = [model for model in ROUTING_ORDER if model != preferred_model_id]
+        return [preferred_model_id, *others]
 
     usage = shared_data["model_usage"][feature]
     ordered = sorted(
-        pool,
+        ROUTING_ORDER,
         key=lambda model: (usage.get(model, 0), model != preferred_model_id),
     )
     return ordered
@@ -194,9 +186,9 @@ with st.sidebar:
     MODEL_ID = MODEL_OPTIONS[selected_model_name]
 
     auto_route = st.checkbox(
-        "모델 자동 분산 라우팅 (실험 기능)",
-        value=False,
-        help="기본은 안정 모드(수동 선택 우선). 필요할 때만 자동 분산을 켜세요.",
+        "모델 자동 분산 라우팅 (모델별 무료 슬롯 균등 사용)",
+        value=True,
+        help="모델별 호출 횟수를 분산해 429/쿼터 초과 시 자동으로 다른 모델로 전환합니다.",
     )
 
     st.success(f"현재 엔진(기본): {selected_model_name}")
@@ -275,8 +267,6 @@ with tab0:
                         feature="log_select",
                         preferred_model_id=MODEL_ID,
                         auto_route=auto_route,
-                        timeout_seconds=28,
-                        max_retries=1,
                     )
                     st.session_state["classified_result"] = classified_result
                     st.caption(f"실행 모델: {used_model}")
@@ -325,8 +315,8 @@ with tab1:
                         feature="log_detail",
                         preferred_model_id=MODEL_ID,
                         auto_route=auto_route,
-                        timeout_seconds=24,
-                        max_retries=1,
+                        timeout_seconds=14,
+                        max_retries=0,
                     )
                     st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
@@ -357,8 +347,8 @@ with tab1:
                                 feature="log_detail",
                                 preferred_model_id=MODEL_ID,
                                 auto_route=auto_route,
-                                timeout_seconds=20,
-                                max_retries=1,
+                                timeout_seconds=14,
+                                max_retries=0,
                             )
                             parsed_json = validate_log_analysis_json(repaired_result) or parsed_json
                             st.caption(f"보정 실행 모델: {used_model}")
@@ -414,8 +404,6 @@ with tab2:
                         feature="spec_lookup",
                         preferred_model_id=MODEL_ID,
                         auto_route=auto_route,
-                        timeout_seconds=24,
-                        max_retries=1,
                     )
                     st.caption(f"실행 모델: {used_model}")
                 except LLMError as e:
@@ -479,8 +467,6 @@ with tab3:
                             preferred_model_id=MODEL_ID,
                             auto_route=auto_route,
                             temperature=0.0,
-                            timeout_seconds=35,
-                            max_retries=1,
                         )
                         st.caption(f"실행 모델: {used_model}")
                     except LLMError as e:
