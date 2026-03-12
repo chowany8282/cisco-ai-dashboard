@@ -18,3 +18,18 @@ def test_sanitize_html_blocks_javascript_protocol():
     raw = "<a href='javascript:alert(1)'>bad</a>"
     safe = sanitize_basic_html(raw)
     assert "javascript:" not in safe
+
+
+def test_sanitize_html_removes_script_and_disallowed_tags():
+    raw = "<h3>ok</h3><script>alert(1)</script><img src='x'/>"
+    safe = sanitize_basic_html(raw)
+    assert "<script" not in safe
+    assert "<img" not in safe
+    assert "ok" in safe
+
+
+def test_sanitize_html_allows_http_links_only():
+    raw = "<a href='https://example.com'>good</a><a href='ftp://x'>bad</a>"
+    safe = sanitize_basic_html(raw)
+    assert 'href="https://example.com"' in safe
+    assert "ftp://" not in safe
