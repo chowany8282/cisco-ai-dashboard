@@ -8,7 +8,7 @@ from services.parsers import parse_log_analysis, sanitize_basic_html
 from services.quality import (
     has_os_recommendation_markers,
     has_required_action_sections,
-    normalize_action_sections,
+    has_structured_os_html,
 )
 from services.schemas import validate_log_analysis_json
 
@@ -366,27 +366,28 @@ with tab1:
                             pass
 
                     if parsed_json:
-                        normalized_part3 = normalize_action_sections(parsed_json.part3)
                         if not has_required_action_sections(parsed_json.part3):
-                            st.warning("권장 조치 형식을 자동 보정해 표시합니다.")
+                            st.warning("권장 조치 섹션 일부가 누락되었습니다. 결과를 검토하세요.")
                         st.subheader("🔴 발생 원인")
                         st.error(parsed_json.part1)
                         st.subheader("🟡 네트워크 영향")
                         st.warning(parsed_json.part2)
                         st.subheader("🟢 권장 조치")
-                        st.success(normalized_part3)
+                        st.success(parsed_json.part3)
                     else:
                         parsed_legacy = parse_log_analysis(result)
                         if parsed_legacy:
-                            normalized_part3 = normalize_action_sections(parsed_legacy["part3"])
                             if not has_required_action_sections(parsed_legacy["part3"]):
-                                st.warning("권장 조치 형식을 자동 보정해 표시합니다.")
+                                st.warning(
+                                    "권장 조치 섹션 일부가 누락되었습니다. "
+                                    "결과를 검토하세요."
+                                )
                             st.subheader("🔴 발생 원인")
                             st.error(parsed_legacy["part1"])
                             st.subheader("🟡 네트워크 영향")
                             st.warning(parsed_legacy["part2"])
                             st.subheader("🟢 권장 조치")
-                            st.success(normalized_part3)
+                            st.success(parsed_legacy["part3"])
                         else:
                             st.info("구조화 파싱에 실패하여 원문을 표시합니다.")
                             st.markdown(result)
@@ -489,12 +490,51 @@ with tab3:
                             st.code(str(e))
                     else:
                         response_html = response_html.replace("```html", "").replace("```", "")
-                        if not has_os_recommendation_markers(response_html):
+
+                        is_structured = has_structured_os_html(response_html)
+                        has_markers = has_os_recommendation_markers(response_html)
+
+                        if not (is_structured and has_markers):
+                            repair_prompt = f"""
+아래 입력 기준으로 OS 추천 결과를 다시 생성하세요.
+반드시 HTML만 출력하고, table/tr/th/td/a/h3/br 태그만 사용하세요.
+반드시 Gold Star 또는 MD 추천만 포함하고, 근거(근거 컬럼)도 포함하세요.
+
+장비: {os_model} ({device_family})
+현재 버전: {os_ver_safe}
+"""
+                            try:
+                                repaired_html, used_model = llm_with_routing(
+                                    prompt=repair_prompt,
+                                    api_key=API_KEY_OS,
+                                    feature="os_recommend",
+                                    preferred_model_id="models/gemini-3-flash-preview",
+                                    auto_route=False,
+                                    temperature=0.0,
+                                    timeout_seconds=35,
+                                    max_retries=1,
+                                )
+                                response_html = repaired_html.replace("```html", "")
+                                response_html = response_html.replace("```", "")
+                                st.caption(f"보정 실행 모델: {used_model}")
+                                is_structured = has_structured_os_html(response_html)
+                                has_markers = has_os_recommendation_markers(response_html)
+                            except LLMError:
+                                pass
+
+                        if not has_markers:
                             st.warning(
                                 "Gold Star/MD 또는 근거 정보가 부족합니다. "
                                 "결과를 확인 후 사용하세요."
                             )
 
+                        if not is_structured:
+                            st.warning(
+                                "OS 추천 결과가 표 형식으로 생성되지 않았습니다. "
+                                "재시도 권장"
+                            )
+
                         safe_html = sanitize_basic_html(response_html)
-                        shared_data["os_weekly_cache"][cache_key] = safe_html
+                        if is_structured:
+                            shared_data["os_weekly_cache"][cache_key] = safe_html
                         st.markdown(safe_html, unsafe_allow_html=True)
