@@ -1,0 +1,4 @@
+[대상 모델]: {model_input}
+위 모델의 하드웨어 스펙을 표(Table)로 요약해주세요.
+항목: Fixed Ports, Switching Capacity, Forwarding Rate, CPU/Memory, Power.
+주요 특징 3가지 포함. 한국어 답변.
