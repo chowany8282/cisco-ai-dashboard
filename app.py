@@ -23,6 +23,13 @@ def get_prompt_template(name: str) -> str:
     return load_prompt(name)
 
 
+def render_prompt(template: str, **values: str) -> str:
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace(f"{{{key}}}", value)
+    return rendered
+
+
 try:
     API_KEY_LOG = st.secrets["API_KEY_LOG"]
     API_KEY_SPEC = st.secrets["API_KEY_SPEC"]
@@ -66,7 +73,10 @@ with tab1:
         if not log_input:
             st.warning("로그를 입력해주세요!")
         else:
-            prompt = get_prompt_template("log_analysis.txt").format(log_input=log_input)
+            prompt = render_prompt(
+                get_prompt_template("log_analysis.txt"),
+                log_input=log_input,
+            )
             with st.spinner(f"AI가 로그를 분석 중입니다... ({selected_model_name})"):
                 try:
                     result = get_gemini_response(
@@ -108,7 +118,10 @@ with tab2:
         if not model_input:
             st.warning("모델명을 입력해주세요!")
         else:
-            prompt = get_prompt_template("spec_lookup.txt").format(model_input=model_input)
+            prompt = render_prompt(
+                get_prompt_template("spec_lookup.txt"),
+                model_input=model_input,
+            )
             with st.spinner("데이터시트 검색 중..."):
                 try:
                     result = get_gemini_response(
@@ -143,7 +156,8 @@ with tab3:
             current_ver_url = (
                 f"https://www.google.com/search?q={current_ver_query.replace(' ', '+')}"
             )
-            prompt = get_prompt_template("os_recommendation.txt").format(
+            prompt = render_prompt(
+                get_prompt_template("os_recommendation.txt"),
                 os_model=os_model,
                 os_ver=(os_ver if os_ver else "정보 없음"),
                 current_ver_url=current_ver_url,
