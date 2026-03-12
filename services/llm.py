@@ -16,7 +16,6 @@ def get_gemini_response(
     model_id: str,
     timeout_seconds: int = 30,
     max_retries: int = 2,
-    temperature: float | None = None,
 ) -> str:
     """Generate content with lightweight timeout/retry handling."""
     genai.configure(api_key=api_key)
@@ -25,13 +24,10 @@ def get_gemini_response(
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
-            call_kwargs = {
-                "request_options": {"timeout": timeout_seconds},
-            }
-            if temperature is not None:
-                call_kwargs["generation_config"] = {"temperature": temperature}
-
-            response = model.generate_content(prompt, **call_kwargs)
+            response = model.generate_content(
+                prompt,
+                request_options={"timeout": timeout_seconds},
+            )
             return (response.text or "").strip()
         except Exception as e:  # noqa: BLE001
             last_error = e
