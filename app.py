@@ -55,13 +55,6 @@ def render_prompt(template: str, **values: str) -> str:
     return rendered
 
 
-def clean_html_response(text: str) -> str:
-    cleaned = text or ""
-    for fence in ["```html", "```HTML", "```Html", "```"]:
-        cleaned = cleaned.replace(fence, "")
-    return cleaned.strip()
-
-
 @st.cache_resource
 def get_shared_store() -> dict:
     return {
@@ -372,31 +365,6 @@ with tab1:
                         except LLMError:
                             pass
 
-                    if not parsed_json:
-                        strict_repair_prompt = f"""
-아래 로그를 다시 분석하고 JSON으로만 답하세요.
-키는 part1, part2, part3만 사용하세요.
-part3는 실행 가능한 조치 중심으로 작성하세요.
-
-로그:
-{log_input}
-"""
-                        try:
-                            repaired_result, used_model = llm_with_routing(
-                                prompt=strict_repair_prompt,
-                                api_key=API_KEY_LOG,
-                                feature="log_detail",
-                                preferred_model_id="models/gemini-3-flash-preview",
-                                auto_route=False,
-                                timeout_seconds=24,
-                                max_retries=1,
-                            )
-                            parsed_json = validate_log_analysis_json(repaired_result)
-                            if parsed_json:
-                                st.caption(f"구조화 보정 모델: {used_model}")
-                        except LLMError:
-                            pass
-
                     if parsed_json:
                         if not has_required_action_sections(parsed_json.part3):
                             st.warning("권장 조치 섹션 일부가 누락되었습니다. 결과를 검토하세요.")
@@ -486,23 +454,15 @@ with tab3:
         else:
             os_ver_safe = os_ver if os_ver else "정보 없음"
             cache_key = _get_weekly_cache_key(device_family, os_model, os_ver_safe)
-            cached_html = shared_data["os_weekly_cache"].get(cache_key)
-
-            if cached_html:
-                cached_structured = has_structured_os_html(cached_html)
-                cached_markers = has_os_recommendation_markers(cached_html)
-                if cached_structured and cached_markers:
-                    st.info("주간 고정 캐시 결과를 표시합니다.")
-                    st.markdown(cached_html, unsafe_allow_html=True)
-                else:
-                    shared_data["os_weekly_cache"].pop(cache_key, None)
-                    cached_html = None
-
-            if not cached_html:
+            if cache_key in shared_data["os_weekly_cache"]:
+                cached_html = shared_data["os_weekly_cache"][cache_key]
+                st.info("주간 고정 캐시 결과를 표시합니다.")
+                st.markdown(cached_html, unsafe_allow_html=True)
+            else:
                 prompt = render_prompt(
                     get_prompt_template("os_recommendation.txt"),
                     os_model=f"{os_model} ({device_family})",
-                    os_ver=os_ver_safe,
+                    os_ver=(os_ver if os_ver else "정보 없음"),
                     current_ver_url=(
                         "https://www.google.com/search?q="
                         + (
@@ -529,7 +489,8 @@ with tab3:
                         with st.expander("오류 상세"):
                             st.code(str(e))
                     else:
-                        response_html = clean_html_response(response_html)
+                        response_html = response_html.replace("```html", "").replace("```", "")
+
                         is_structured = has_structured_os_html(response_html)
                         has_markers = has_os_recommendation_markers(response_html)
 
@@ -553,7 +514,8 @@ with tab3:
                                     timeout_seconds=35,
                                     max_retries=1,
                                 )
-                                response_html = clean_html_response(repaired_html)
+                                response_html = repaired_html.replace("```html", "")
+                                response_html = response_html.replace("```", "")
                                 st.caption(f"보정 실행 모델: {used_model}")
                                 is_structured = has_structured_os_html(response_html)
                                 has_markers = has_os_recommendation_markers(response_html)
@@ -573,6 +535,6 @@ with tab3:
                             )
 
                         safe_html = sanitize_basic_html(response_html)
-                        if is_structured and has_markers:
+                        if is_structured:
                             shared_data["os_weekly_cache"][cache_key] = safe_html
                         st.markdown(safe_html, unsafe_allow_html=True)
