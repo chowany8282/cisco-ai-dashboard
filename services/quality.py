@@ -60,3 +60,8 @@ def has_os_recommendation_markers(html: str) -> bool:
     has_gold_or_md = ("gold" in lowered) or ("md" in lowered)
     has_evidence = ("근거" in (html or "")) or ("evidence" in lowered)
     return has_gold_or_md and has_evidence
+
+
+def has_structured_os_html(html: str) -> bool:
+    lowered = (html or "").lower()
+    return ("<table" in lowered) and ("<tr" in lowered) and ("<td" in lowered)
