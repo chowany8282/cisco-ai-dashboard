@@ -165,6 +165,53 @@ def has_required_action_sections(part3_text: str) -> bool:
     return all(section in part3_text for section in REQUIRED_ACTION_SECTIONS)
 
 
+def normalize_action_sections(part3_text: str) -> str:
+    text = (part3_text or "").strip()
+    if not text:
+        text = "원문 권장 조치가 비어 있습니다. 로그를 재확인하세요."
+
+    if has_required_action_sections(text):
+        return text
+
+    verify_cmds = (
+        "```\n"
+        "show interface status\n"
+        "show logging | inc ERROR|UPDOWN|SPANTREE\n"
+        "show spanning-tree interface <INTERFACE> detail\n"
+        "```"
+    )
+    rollback_cmds = (
+        "```\n"
+        "configure terminal\n"
+        "interface <INTERFACE>\n"
+        "shutdown\n"
+        "no shutdown\n"
+        "end\n"
+        "```"
+    )
+    fallback = {
+        "즉시 조치": "- 영향 인터페이스/장비를 즉시 식별하고 장애 범위를 격리합니다.",
+        "원인별 상세 조치": (
+            "- 물리 계층(케이블/SFP), 인접 장비 설정(STP/LACP), "
+            "오류 카운터를 순서대로 점검합니다."
+        ),
+        "검증 절차": verify_cmds,
+        "롤백 계획": rollback_cmds,
+        "재발 방지 체크리스트": (
+            "- 반복 장애 시 포트 정책(BPDU Guard/Loop Guard), "
+            "소프트웨어 버전, 변경 이력을 점검합니다."
+        ),
+    }
+
+    return (
+        f"1) 즉시 조치\n{text}\n\n"
+        f"2) 원인별 상세 조치\n{fallback['원인별 상세 조치']}\n\n"
+        f"3) 검증 절차\n{fallback['검증 절차']}\n\n"
+        f"4) 롤백 계획\n{fallback['롤백 계획']}\n\n"
+        f"5) 재발 방지 체크리스트\n{fallback['재발 방지 체크리스트']}"
+    )
+
+
 shared_data = get_shared_store()
 kst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
 today_str = kst_now.strftime("%Y-%m-%d")
@@ -361,23 +408,27 @@ with tab1:
                             pass
 
                     if parsed_json:
+                        normalized_part3 = normalize_action_sections(parsed_json.part3)
                         if not has_required_action_sections(parsed_json.part3):
-                            st.warning("권장 조치 일부 섹션이 누락되어 수동 검토가 필요합니다.")
+                            st.warning("권장 조치 형식을 자동 보정해 표시합니다.")
                         st.subheader("🔴 발생 원인")
                         st.error(parsed_json.part1)
                         st.subheader("🟡 네트워크 영향")
                         st.warning(parsed_json.part2)
                         st.subheader("🟢 권장 조치")
-                        st.success(parsed_json.part3)
+                        st.success(normalized_part3)
                     else:
                         parsed_legacy = parse_log_analysis(result)
                         if parsed_legacy:
+                            normalized_part3 = normalize_action_sections(parsed_legacy["part3"])
+                            if not has_required_action_sections(parsed_legacy["part3"]):
+                                st.warning("권장 조치 형식을 자동 보정해 표시합니다.")
                             st.subheader("🔴 발생 원인")
                             st.error(parsed_legacy["part1"])
                             st.subheader("🟡 네트워크 영향")
                             st.warning(parsed_legacy["part2"])
                             st.subheader("🟢 권장 조치")
-                            st.success(parsed_legacy["part3"])
+                            st.success(normalized_part3)
                         else:
                             st.info("구조화 파싱에 실패하여 원문을 표시합니다.")
                             st.markdown(result)
